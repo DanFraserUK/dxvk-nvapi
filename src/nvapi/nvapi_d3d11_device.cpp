@@ -60,7 +60,7 @@ namespace dxvk {
     }
 
     NvapiD3d11Device::NvapiD3d11Device(ID3D11VkExtDevice* dxvkDevice, ID3D11VkExtContext* dxvkContext)
-        : m_dxvkDevice(static_cast<ID3D11VkExtDevice1*>(dxvkDevice)), m_dxvkContext(static_cast<ID3D11VkExtContext1*>(dxvkContext)) { // NOLINT(*-pro-type-static-cast-downcast)
+        : m_dxvkDevice(static_cast<ID3D11VkExtDevice2*>(dxvkDevice)), m_dxvkContext(static_cast<ID3D11VkExtContext2*>(dxvkContext)) { // NOLINT(*-pro-type-static-cast-downcast)
         m_supportsExtDepthBounds = m_dxvkDevice->GetExtensionSupport(D3D11_VK_EXT_DEPTH_BOUNDS);
         m_supportsNvxBinaryImport = m_dxvkDevice->GetExtensionSupport(D3D11_VK_NVX_BINARY_IMPORT);
         m_supportsExtBarrierControl = m_dxvkDevice->GetExtensionSupport(D3D11_VK_EXT_BARRIER_CONTROL);

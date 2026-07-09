@@ -3,6 +3,7 @@
 #include "nvapi/nvapi_d3d_low_latency_device.h"
 #include "util/util_statuscode.h"
 #include "util/util_env.h"
+#include "nvapi/nvapi_d3d11_device.h"
 
 using namespace dxvk;
 
