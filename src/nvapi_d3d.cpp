@@ -478,6 +478,11 @@ NVAPI_FUNCTION NvAPI_D3D_SetMultiViewMode(IUnknown* pDevOrContext, NV_MULTIVIEW_
     if (pMultiViewParams->numViews == 0 || pMultiViewParams->numViews > NV_MULTIVIEW_MAX_SUPPORTED_VIEWS)
         return InvalidArgument(n);
 
+    // Phase 2: forward the toggle to an SMP-capable DXVK when present
+    if (auto device = NvapiD3d11Device::GetOrCreate(pDevOrContext);
+        device && device->SetMultiviewMode(pMultiViewParams->numViews, pMultiViewParams->independentViewportMaskEnable != 0))
+        return Ok(str::format(n, " (numViews=", pMultiViewParams->numViews, ") (forwarded)"), alreadyLogged);
+
     // Phase 1: accept and log the request, but multi-view rendering is not
     // implemented yet. NVIDIA documents this call as asynchronous, returning
     // OK merely means the arguments were valid. Phase 2 will forward this

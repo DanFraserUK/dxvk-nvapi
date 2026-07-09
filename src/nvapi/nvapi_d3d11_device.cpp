@@ -69,6 +69,33 @@ namespace dxvk {
 
         m_supportsExtDevice1 = probeInterfaceChain(dxvkDevice, {__uuidof(ID3D11VkExtDevice1)}) >= 1;
         m_supportsExtContext1 = probeInterfaceChain(dxvkContext, {__uuidof(ID3D11VkExtContext1)}) >= 1;
+
+        // Phase 2: revision-2 interfaces exist only on SMP-patched DXVK.
+        // False flags = stock DXVK = Phase 1.5 pass-through fallback.
+        m_supportsExtDevice2 = probeInterfaceChain(dxvkDevice, {__uuidof(ID3D11VkExtDevice1), __uuidof(ID3D11VkExtDevice2)}) >= 2;
+        m_supportsExtContext2 = probeInterfaceChain(dxvkContext, {__uuidof(ID3D11VkExtContext1), __uuidof(ID3D11VkExtContext2)}) >= 2;
+    }
+
+    HRESULT NvapiD3d11Device::CreateVertexShaderNvSemantics(const void* pShaderBytecode, size_t bytecodeLength, ID3D11ClassLinkage* pClassLinkage, const D3D11_VK_NV_CUSTOM_SEMANTIC* pSemantics, uint32_t numSemantics, ID3D11VertexShader** ppVertexShader) const {
+        if (!m_supportsExtDevice2)
+            return E_NOTIMPL;
+
+        return m_dxvkDevice->CreateVertexShaderNvSemantics(pShaderBytecode, bytecodeLength, pClassLinkage, pSemantics, numSemantics, ppVertexShader);
+    }
+
+    HRESULT NvapiD3d11Device::CreateGeometryShaderNvSemantics(const void* pShaderBytecode, size_t bytecodeLength, ID3D11ClassLinkage* pClassLinkage, const D3D11_VK_NV_CUSTOM_SEMANTIC* pSemantics, uint32_t numSemantics, bool useViewportMask, ID3D11GeometryShader** ppGeometryShader) const {
+        if (!m_supportsExtDevice2)
+            return E_NOTIMPL;
+
+        return m_dxvkDevice->CreateGeometryShaderNvSemantics(pShaderBytecode, bytecodeLength, pClassLinkage, pSemantics, numSemantics, useViewportMask, ppGeometryShader);
+    }
+
+    bool NvapiD3d11Device::SetMultiviewMode(uint32_t numViews, bool independentViewportMask) const {
+        if (!m_supportsExtContext2)
+            return false;
+
+        m_dxvkContext->SetMultiviewModeNV(numViews, independentViewportMask ? TRUE : FALSE);
+        return true;
     }
 
     HRESULT NvapiD3d11Device::SetDepthBoundsTest(const bool enable, const float minDepth, const float maxDepth) const {

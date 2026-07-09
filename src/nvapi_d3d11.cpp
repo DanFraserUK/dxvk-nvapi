@@ -612,8 +612,27 @@ NVAPI_FUNCTION NvAPI_D3D11_CreateVertexShaderEx(ID3D11Device* pDevice, const voi
     if (pCreateVertexShaderExArgs->NumCustomSemantics > NV_CUSTOM_SEMANTIC_MAX_LIMIT)
         return InvalidArgument(n);
 
-    // Phase 1.5 reconnaissance: record every non-trivial request in full.
-    // These lines are the requirements list for a real SMP implementation.
+     // Phase 2: forward to an SMP-capable DXVK when present
+    if (auto device = NvapiD3d11Device::GetOrCreate(pDevice)) {
+        std::array<D3D11_VK_NV_CUSTOM_SEMANTIC, NV_CUSTOM_SEMANTIC_MAX_LIMIT> semantics{};
+        for (auto i = 0U; i < pCreateVertexShaderExArgs->NumCustomSemantics; i++) {
+            auto& src = pCreateVertexShaderExArgs->pCustomSemantics[i];
+            auto& dst = semantics[i];
+            dst.Type = src.NVCustomSemanticType;
+            std::strncpy(dst.Name, src.NVCustomSemanticNameString, sizeof(dst.Name) - 1);
+            dst.RegisterSpecified = src.RegisterSpecified;
+            dst.RegisterNum = src.RegisterNum;
+            dst.RegisterMask = src.RegisterMask;
+        }
+
+        if (SUCCEEDED(device->CreateVertexShaderNvSemantics(pShaderBytecode, BytecodeLength, pClassLinkage, semantics.data(), pCreateVertexShaderExArgs->NumCustomSemantics, ppVertexShader)))
+            return Ok(str::format(n, " (forwarded to DXVK)"), alreadyLoggedOk);
+    }
+    // ^^^ END of new code. Below is unchanged Phase 1.5 code except ONE string
+    //     edit in the final Ok(...), so the two paths read apart in logs forever
+    //     - plus the relocated reconnaissance log line, right below:
+
+    // Fallback: Phase 1.5 pass-through (stock DXVK, or forward failed)
     if (pCreateVertexShaderExArgs->NumCustomSemantics > 0)
         log::info(str::format(n, ": semantics [",
             DescribeCustomSemantics(pCreateVertexShaderExArgs->NumCustomSemantics, pCreateVertexShaderExArgs->pCustomSemantics),
@@ -656,8 +675,31 @@ NVAPI_FUNCTION NvAPI_D3D11_CreateGeometryShaderEx_2(ID3D11Device* pDevice, const
         DescribeCustomSemantics(pCreateGeometryShaderExArgs->NumCustomSemantics, pCreateGeometryShaderExArgs->pCustomSemantics),
         "] - created as plain GS, extensions IGNORED (Phase 1.5)"));
 
+        // Phase 2: forward to an SMP-capable DXVK when present
+    if (auto device = NvapiD3d11Device::GetOrCreate(pDevice)) {
+        std::array<D3D11_VK_NV_CUSTOM_SEMANTIC, NV_CUSTOM_SEMANTIC_MAX_LIMIT> semantics{};
+        for (auto i = 0U; i < pCreateGeometryShaderExArgs->NumCustomSemantics; i++) {
+            auto& src = pCreateGeometryShaderExArgs->pCustomSemantics[i];
+            auto& dst = semantics[i];
+            dst.Type = src.NVCustomSemanticType;
+            std::strncpy(dst.Name, src.NVCustomSemanticNameString, sizeof(dst.Name) - 1);
+            dst.RegisterSpecified = src.RegisterSpecified;
+            dst.RegisterNum = src.RegisterNum;
+            dst.RegisterMask = src.RegisterMask;
+        }
+
+        if (SUCCEEDED(device->CreateGeometryShaderNvSemantics(pShaderBytecode, BytecodeLength, pClassLinkage, semantics.data(), pCreateGeometryShaderExArgs->NumCustomSemantics, pCreateGeometryShaderExArgs->UseViewportMask != 0, ppGeometryShader)))
+            return Ok(str::format(n, " (forwarded to DXVK)"), alreadyLoggedOk);
+    }
+    
+    // Fallback: Phase 1.5 pass-through (stock DXVK, or forward failed)
+    if (pCreateGeometryShaderExArgs->NumCustomSemantics > 0)
+        log::info(str::format(n, ": flags [ViewportMask=", pCreateGeometryShaderExArgs->UseViewportMask,
+            "] semantics [", DescribeCustomSemantics(pCreateGeometryShaderExArgs->NumCustomSemantics, pCreateGeometryShaderExArgs->pCustomSemantics),
+            "] - created as plain GS, extensions IGNORED (Phase 1.5)"));
+
     if (FAILED(pDevice->CreateGeometryShader(pShaderBytecode, BytecodeLength, pClassLinkage, ppGeometryShader)))
         return Error(n, alreadyLoggedError);
 
-    return Ok(str::format(n, " (pass-through)"), alreadyLoggedOk);
+    return Ok(str::format(n, " (NumCustomSemantics=", pCreateGeometryShaderExArgs->NumCustomSemantics, ") (pass-through fallback)"), alreadyLoggedOk);
 }
