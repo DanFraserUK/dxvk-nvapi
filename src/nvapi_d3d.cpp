@@ -564,7 +564,7 @@ NVAPI_FUNCTION NvAPI_D3D_QueryModifiedWSupport(IUnknown* pDev, NV_QUERY_MODIFIED
     if (auto adapter = GetMultiViewAdapter(pDev))
         pascalOrNewer = adapter->GetArchitectureId() >= NV_GPU_ARCHITECTURE_GP100;
 
-    pQueryModifiedWSupportedParams->bModifiedWSupported = false;
+    pQueryModifiedWSupportedParams->bModifiedWSupported = pascalOrNewer;
 
     return Ok(str::format(n, " (ModifiedW=", pascalOrNewer ? "supported" : "unsupported", ")"), alreadyLogged);
 }
