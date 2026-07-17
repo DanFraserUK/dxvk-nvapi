@@ -4,6 +4,7 @@
 #include "util/util_statuscode.h"
 #include "util/util_env.h"
 #include "nvapi/nvapi_d3d11_device.h"
+#include <winternl.h>
 
 using namespace dxvk;
 
@@ -479,10 +480,15 @@ NVAPI_FUNCTION NvAPI_D3D_SetMultiViewMode(IUnknown* pDevOrContext, NV_MULTIVIEW_
     if (pMultiViewParams->numViews == 0 || pMultiViewParams->numViews > NV_MULTIVIEW_MAX_SUPPORTED_VIEWS)
         return InvalidArgument(n);
 
-    log::info(str::format("[SMP-DIAG-OUTERCALLER] retaddr0=", log::fmt::ptr(__builtin_return_address(0)),
-        " retaddr1=", log::fmt::ptr(__builtin_return_address(1)),
-        " retaddr2=", log::fmt::ptr(__builtin_return_address(2)),
-        " retaddr3=", log::fmt::ptr(__builtin_return_address(3))));
+    {
+        void* stackFrames[8] = {};
+        USHORT frameCount = RtlCaptureStackBackTrace(0, 8, stackFrames, nullptr);
+        auto trace = str::format("[SMP-DIAG-STACKWALK] frames=", frameCount);
+        for (USHORT i = 0; i < frameCount; i++) {
+            trace += str::format(" f", i, "=", log::fmt::ptr(stackFrames[i]));
+        }
+        log::info(trace);
+    }
 
     // Phase 2: forward the toggle to an SMP-capable DXVK when present
     if (auto device = NvapiD3d11Device::GetOrCreate(pDevOrContext);
