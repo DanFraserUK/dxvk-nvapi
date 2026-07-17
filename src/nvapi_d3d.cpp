@@ -479,6 +479,8 @@ NVAPI_FUNCTION NvAPI_D3D_SetMultiViewMode(IUnknown* pDevOrContext, NV_MULTIVIEW_
     if (pMultiViewParams->numViews == 0 || pMultiViewParams->numViews > NV_MULTIVIEW_MAX_SUPPORTED_VIEWS)
         return InvalidArgument(n);
 
+    log::info(str::format("[SMP-DIAG-OUTERCALLER] retaddr0=", log::fmt::ptr(__builtin_return_address(0)), " retaddr1=", log::fmt::ptr(__builtin_return_address(1))));
+
     // Phase 2: forward the toggle to an SMP-capable DXVK when present
     if (auto device = NvapiD3d11Device::GetOrCreate(pDevOrContext);
         device && device->SetMultiviewMode(pMultiViewParams->numViews, pMultiViewParams->independentViewportMaskEnable != 0))
