@@ -481,13 +481,15 @@ NVAPI_FUNCTION NvAPI_D3D_SetMultiViewMode(IUnknown* pDevOrContext, NV_MULTIVIEW_
         return InvalidArgument(n);
 
     {
-        void* stackFrames[8] = {};
-        USHORT frameCount = RtlCaptureStackBackTrace(0, 8, stackFrames, nullptr);
-        auto trace = str::format("[SMP-DIAG-STACKWALK] frames=", frameCount);
-        for (USHORT i = 0; i < frameCount; i++) {
-            trace += str::format(" f", i, "=", log::fmt::ptr(stackFrames[i]));
+        void* stack[24];
+        USHORT frames = RtlCaptureStackBackTrace(0, 24, stack, nullptr);
+
+        std::string trace;
+        for (USHORT i = 0; i < frames; i++) {
+            trace += str::format(" f", i, "=", stack[i]);
         }
-        log::info(trace);
+
+        log::info(str::format("[SMP-DIAG-STACKWALK] frames=", frames, trace));
     }
 
     // Phase 2: forward the toggle to an SMP-capable DXVK when present
