@@ -481,8 +481,8 @@ NVAPI_FUNCTION NvAPI_D3D_SetMultiViewMode(IUnknown* pDevOrContext, NV_MULTIVIEW_
         return InvalidArgument(n);
 
     {
-        void* stack[24];
-        USHORT frames = RtlCaptureStackBackTrace(0, 24, stack, nullptr);
+        void* stack[8];
+        USHORT frames = RtlCaptureStackBackTrace(0, 8, stack, nullptr);
 
         std::string trace;
         for (USHORT i = 0; i < frames; i++) {
