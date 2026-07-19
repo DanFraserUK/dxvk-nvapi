@@ -1,5 +1,7 @@
 #include "nvapi_d3d11_device.h"
 #include "../util/com_pointer.h"
+#include "../util/util_string.h"
+#include "../util/util_log.h"
 
 namespace dxvk {
     std::unordered_map<IUnknown*, std::shared_ptr<NvapiD3d11Device>> NvapiD3d11Device::m_nvapiDeviceMap;
@@ -93,6 +95,9 @@ namespace dxvk {
     bool NvapiD3d11Device::SetMultiviewMode(uint32_t numViews, bool independentViewportMask) const {
         if (!m_supportsExtContext2)
             return false;
+
+        log::info(str::format("[SMP-DIAG-ARGS] numViews=", numViews,
+            " independentViewportMask=", independentViewportMask ? 1 : 0));
 
         m_dxvkContext->SetMultiviewModeNV(numViews, independentViewportMask ? TRUE : FALSE);
         return true;
