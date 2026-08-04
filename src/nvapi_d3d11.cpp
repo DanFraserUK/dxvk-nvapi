@@ -552,21 +552,19 @@ NVAPI_FUNCTION NvAPI_D3D11_GetCudaTextureObject(ID3D11Device* pDevice, NvU32 srv
 
 
 // ---------------------------------------------------------------------------
-// Extended shader creation - SMP Phase 1.5
+// Extended shader creation
 //
-// iRacing calls these after our Phase 1 capability answers
-// (QueryMultiViewSupport / QueryModifiedWSupport) report support: it tries to
-// create vertex/geometry shaders carrying NVIDIA-specific extensions (custom
-// semantics like NV_X_RIGHT / NV_VIEWPORT_MASK, and viewport-broadcast flags).
-// Without these entry points the game gets a null pointer, shader setup fails,
-// and the simulator hangs at session load.
+// A game calls these to create vertex and geometry shaders carrying
+// NVIDIA-specific extensions: custom semantics such as NV_POSITION_VIEW_1 and
+// NV_VIEWPORT_MASK, and viewport-broadcast flags. Without these entry points
+// the game gets a null pointer, shader setup fails, and it may hang at
+// session load.
 //
-// Phase 1.5 behaviour: validate the request, LOG exactly what was asked for
-// (this is the specification for real SMP support later), then create the
-// shader through the plain D3D11 path. The bytecode is ordinary DXBC, so the
-// shader is fully valid - the NVIDIA-specific extras are simply not acted on.
-// Correct as long as nothing relies on the extended outputs (i.e. the SMP
-// toggle stays OFF); real multi-view rendering is Phase 2+.
+// Where DXVK implements the extended interfaces, the request is forwarded
+// with the semantic list intact. Otherwise the shader is created through the
+// plain D3D11 path: the bytecode is ordinary DXBC and the shader is valid, but
+// the NVIDIA-specific outputs are not acted on, so multi-view rendering will
+// not work.
 // ---------------------------------------------------------------------------
 
 // Renders the game's custom-semantic requests as a readable string for the log,
@@ -612,7 +610,7 @@ NVAPI_FUNCTION NvAPI_D3D11_CreateVertexShaderEx(ID3D11Device* pDevice, const voi
     if (pCreateVertexShaderExArgs->NumCustomSemantics > NV_CUSTOM_SEMANTIC_MAX_LIMIT)
         return InvalidArgument(n);
 
-     // Phase 2: forward to an SMP-capable DXVK when present
+    // forward to an SMP-capable DXVK when present
     if (auto device = NvapiD3d11Device::GetOrCreate(pDevice)) {
         std::array<D3D11_VK_NV_CUSTOM_SEMANTIC, NV_CUSTOM_SEMANTIC_MAX_LIMIT> semantics{};
         for (auto i = 0U; i < pCreateVertexShaderExArgs->NumCustomSemantics; i++) {
@@ -628,15 +626,12 @@ NVAPI_FUNCTION NvAPI_D3D11_CreateVertexShaderEx(ID3D11Device* pDevice, const voi
         if (SUCCEEDED(device->CreateVertexShaderNvSemantics(pShaderBytecode, BytecodeLength, pClassLinkage, semantics.data(), pCreateVertexShaderExArgs->NumCustomSemantics, ppVertexShader)))
             return Ok(str::format(n, " (forwarded to DXVK)"), alreadyLoggedOk);
     }
-    // ^^^ END of new code. Below is unchanged Phase 1.5 code except ONE string
-    //     edit in the final Ok(...), so the two paths read apart in logs forever
-    //     - plus the relocated reconnaissance log line, right below:
-
-    // Fallback: Phase 1.5 pass-through (stock DXVK, or forward failed)
+    // Fallback: the shader is created as a plain VS when DXVK does not
+    // support the extended entry point, or when forwarding failed.
     if (pCreateVertexShaderExArgs->NumCustomSemantics > 0)
         log::info(str::format(n, ": semantics [",
             DescribeCustomSemantics(pCreateVertexShaderExArgs->NumCustomSemantics, pCreateVertexShaderExArgs->pCustomSemantics),
-            "] - created as plain VS, extensions IGNORED (Phase 1.5)"));
+            "] - created as plain VS, extensions ignored"));
 
     if (FAILED(pDevice->CreateVertexShader(pShaderBytecode, BytecodeLength, pClassLinkage, ppVertexShader)))
         return Error(n, alreadyLoggedError);
@@ -673,9 +668,9 @@ NVAPI_FUNCTION NvAPI_D3D11_CreateGeometryShaderEx_2(ID3D11Device* pDevice, const
         ", SpecificShaderExt=", pCreateGeometryShaderExArgs->UseSpecificShaderExt,
         "] semantics [",
         DescribeCustomSemantics(pCreateGeometryShaderExArgs->NumCustomSemantics, pCreateGeometryShaderExArgs->pCustomSemantics),
-        "] - created as plain GS, extensions IGNORED (Phase 1.5)"));
+        "] - created as plain GS, extensions ignored"));
 
-        // Phase 2: forward to an SMP-capable DXVK when present
+    // Forward to DXVK when it implements the extended interfaces
     if (auto device = NvapiD3d11Device::GetOrCreate(pDevice)) {
         std::array<D3D11_VK_NV_CUSTOM_SEMANTIC, NV_CUSTOM_SEMANTIC_MAX_LIMIT> semantics{};
         for (auto i = 0U; i < pCreateGeometryShaderExArgs->NumCustomSemantics; i++) {
@@ -692,11 +687,11 @@ NVAPI_FUNCTION NvAPI_D3D11_CreateGeometryShaderEx_2(ID3D11Device* pDevice, const
             return Ok(str::format(n, " (forwarded to DXVK)"), alreadyLoggedOk);
     }
     
-    // Fallback: Phase 1.5 pass-through (stock DXVK, or forward failed)
+    // Fallback: create the shader without the extensions
     if (pCreateGeometryShaderExArgs->NumCustomSemantics > 0)
         log::info(str::format(n, ": flags [ViewportMask=", pCreateGeometryShaderExArgs->UseViewportMask,
             "] semantics [", DescribeCustomSemantics(pCreateGeometryShaderExArgs->NumCustomSemantics, pCreateGeometryShaderExArgs->pCustomSemantics),
-            "] - created as plain GS, extensions IGNORED (Phase 1.5)"));
+            "] - created as plain GS, extensions ignored"));
 
     if (FAILED(pDevice->CreateGeometryShader(pShaderBytecode, BytecodeLength, pClassLinkage, ppGeometryShader)))
         return Error(n, alreadyLoggedError);

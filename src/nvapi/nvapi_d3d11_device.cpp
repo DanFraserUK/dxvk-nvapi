@@ -72,8 +72,9 @@ namespace dxvk {
         m_supportsExtDevice1 = probeInterfaceChain(dxvkDevice, {__uuidof(ID3D11VkExtDevice1)}) >= 1;
         m_supportsExtContext1 = probeInterfaceChain(dxvkContext, {__uuidof(ID3D11VkExtContext1)}) >= 1;
 
-        // Phase 2: revision-2 interfaces exist only on SMP-patched DXVK.
-        // False flags = stock DXVK = Phase 1.5 pass-through fallback.
+        // Revision-2 interfaces exist only on a DXVK that implements the
+        // multi-view entry points. Without them, shader creation falls back
+        // to the plain path.
         m_supportsExtDevice2 = probeInterfaceChain(dxvkDevice, {__uuidof(ID3D11VkExtDevice1), __uuidof(ID3D11VkExtDevice2)}) >= 2;
         m_supportsExtContext2 = probeInterfaceChain(dxvkContext, {__uuidof(ID3D11VkExtContext1), __uuidof(ID3D11VkExtContext2)}) >= 2;
     }
@@ -95,9 +96,6 @@ namespace dxvk {
     bool NvapiD3d11Device::SetMultiviewMode(uint32_t numViews, bool independentViewportMask) const {
         if (!m_supportsExtContext2)
             return false;
-
-        log::info(str::format("[SMP-DIAG-ARGS] numViews=", numViews,
-            " independentViewportMask=", independentViewportMask ? 1 : 0));
 
         m_dxvkContext->SetMultiviewModeNV(numViews, independentViewportMask ? TRUE : FALSE);
         return true;

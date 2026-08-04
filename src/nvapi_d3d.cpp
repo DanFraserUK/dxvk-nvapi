@@ -4,7 +4,6 @@
 #include "util/util_statuscode.h"
 #include "util/util_env.h"
 #include "nvapi/nvapi_d3d11_device.h"
-#include <winternl.h>
 
 using namespace dxvk;
 
@@ -383,24 +382,16 @@ NVAPI_FUNCTION NvAPI_D3D_SetLatencyMarker(IUnknown* pDev, NV_LATENCY_MARKER_PARA
 
 
 // ---------------------------------------------------------------------------
-// Simultaneous Multi-Projection (SMP) / Multi-View support - Phase 1
+// Simultaneous Multi-Projection (SMP) / Multi-View support
 //
-// These entry points let a game *ask* whether the GPU can do multi-view
-// rendering (used by iRacing for its "Nvidia Simultaneous Multi-Projection"
-// option on triple screens). We answer the capability queries truthfully
-// based on the GPU generation, and accept-but-ignore the "set mode" calls.
-// Actual multi-view rendering is NOT implemented yet (that is Phase 2+),
-// so the feature should not be enabled in-game.
+// These entry points let a game ask whether the GPU can do multi-view
+// rendering, and set the mode. iRacing uses them for its "Nvidia Simultaneous
+// Multi-Projection" option on triple screens. Capability queries are answered
+// from the GPU generation. Mode changes are forwarded into DXVK when it
+// implements the extended interfaces, and accepted but ignored otherwise.
 //
 // Hardware capability rules (same as NVIDIA's Windows driver):
 //   - Single-Pass Stereo (2 views):        Pascal  (GTX 10xx) or newer
-//   - MultiView (4 views) / Stereo XYZW:   Turing  (RTX 20xx / GTX 16xx) or newer
-//   - Modified-W (Lens Matched Shading):   Pascal  (GTX 10xx) or newer
-// ---------------------------------------------------------------------------
-
-// Finds the NvapiAdapter (dxvk-nvapi's per-GPU bookkeeping object) that owns
-// the given D3D11 device, so we can ask which GPU generation it is.
-// Returns nullptr for non-NVIDIA GPUs or anything else we don't recognize.
 static NvapiAdapter* GetMultiViewAdapter(IUnknown* pDeviceOrContext) {
     if (!pDeviceOrContext || !nvapiAdapterRegistry)
         return nullptr;
@@ -480,27 +471,14 @@ NVAPI_FUNCTION NvAPI_D3D_SetMultiViewMode(IUnknown* pDevOrContext, NV_MULTIVIEW_
     if (pMultiViewParams->numViews == 0 || pMultiViewParams->numViews > NV_MULTIVIEW_MAX_SUPPORTED_VIEWS)
         return InvalidArgument(n);
 
-    {
-        void* stack[8];
-        USHORT frames = RtlCaptureStackBackTrace(0, 8, stack, nullptr);
-
-        std::string trace;
-        for (USHORT i = 0; i < frames; i++) {
-            trace += str::format(" f", i, "=", stack[i]);
-        }
-
-        log::info(str::format("[SMP-DIAG-STACKWALK] frames=", frames, trace));
-    }
-
-    // Phase 2: forward the toggle to an SMP-capable DXVK when present
+    // Forward the toggle to DXVK when it implements the extended interfaces
     if (auto device = NvapiD3d11Device::GetOrCreate(pDevOrContext);
         device && device->SetMultiviewMode(pMultiViewParams->numViews, pMultiViewParams->independentViewportMaskEnable != 0))
         return Ok(str::format(n, " (numViews=", pMultiViewParams->numViews, ") (forwarded)"), alreadyLogged);
 
-    // Phase 1: accept and log the request, but multi-view rendering is not
-    // implemented yet. NVIDIA documents this call as asynchronous, returning
-    // OK merely means the arguments were valid. Phase 2 will forward this
-    // state into the rendering backend.
+    // Otherwise accept and log the request without acting on it. NVIDIA
+    // documents this call as asynchronous, so returning OK only means the
+    // arguments were valid.
     return Ok(str::format(n, " (numViews=", pMultiViewParams->numViews, ") (not implemented, ignoring)"), alreadyLogged);
 }
 
@@ -552,7 +530,7 @@ NVAPI_FUNCTION NvAPI_D3D_SetSinglePassStereoMode(IUnknown* pDevOrContext, NvU32 
     if (!pDevOrContext || numViews == 0)
         return InvalidArgument(n);
 
-    // Phase 1: accept and log the request, see NvAPI_D3D_SetMultiViewMode
+    // Accept and log the request, see NvAPI_D3D_SetMultiViewMode
     return Ok(str::format(n, " (numViews=", numViews, ") (not implemented, ignoring)"), alreadyLogged);
 }
 
@@ -579,6 +557,7 @@ NVAPI_FUNCTION NvAPI_D3D_QueryModifiedWSupport(IUnknown* pDev, NV_QUERY_MODIFIED
 
     pQueryModifiedWSupportedParams->bModifiedWSupported = pascalOrNewer;
 
+    // Accept and log the request, see NvAPI_D3D_SetMultiViewMode
     return Ok(str::format(n, " (ModifiedW=", pascalOrNewer ? "supported" : "unsupported", ")"), alreadyLogged);
 }
 
@@ -598,6 +577,6 @@ NVAPI_FUNCTION NvAPI_D3D_SetModifiedWMode(IUnknown* pDevOrContext, NV_MODIFIED_W
     if (psModifiedWParams->numEntries > NV_MODIFIED_W_MAX_VIEWPORTS)
         return InvalidArgument(n);
 
-    // Phase 1: accept and log the request, see NvAPI_D3D_SetMultiViewMode
+    // Accept and log the request, see NvAPI_D3D_SetMultiViewMode
     return Ok(str::format(n, " (numEntries=", psModifiedWParams->numEntries, ") (not implemented, ignoring)"), alreadyLogged);
 }
