@@ -686,7 +686,7 @@ NVAPI_FUNCTION NvAPI_D3D11_CreateGeometryShaderEx_2(ID3D11Device* pDevice, const
         if (SUCCEEDED(device->CreateGeometryShaderNvSemantics(pShaderBytecode, BytecodeLength, pClassLinkage, semantics.data(), pCreateGeometryShaderExArgs->NumCustomSemantics, pCreateGeometryShaderExArgs->UseViewportMask != 0, ppGeometryShader)))
             return Ok(str::format(n, " (forwarded to DXVK)"), alreadyLoggedOk);
     }
-    
+
     // Fallback: create the shader without the extensions
     if (pCreateGeometryShaderExArgs->NumCustomSemantics > 0)
         log::info(str::format(n, ": flags [ViewportMask=", pCreateGeometryShaderExArgs->UseViewportMask,
