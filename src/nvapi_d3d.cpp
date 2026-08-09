@@ -383,20 +383,39 @@ NVAPI_FUNCTION NvAPI_D3D_SetLatencyMarker(IUnknown* pDev, NV_LATENCY_MARKER_PARA
 // ---------------------------------------------------------------------------
 // Simultaneous Multi-Projection (SMP) / Multi-View support
 //
-// These entry points let a game ask whether the GPU can do multi-view
-// rendering, and set the mode. iRacing uses them for its "Nvidia Simultaneous
-// Multi-Projection" option on triple screens. Capability queries are answered
-// from the GPU generation. Mode changes are forwarded into DXVK when it
-// implements the extended interfaces, and accepted but ignored otherwise.
+// These entry points let an application ask whether multiview rendering is
+// available and switch the mode on.  iRacing uses them for its "Nvidia
+// Simultaneous Multi-Projection" option on triple screens.
 //
-// Hardware capability rules (same as NVIDIA's Windows driver):
-//   - Single-Pass Stereo (2 views):        Pascal  (GTX 10xx) or newer
+// The work is done by DXVK, so multiview availability depends on both the GPU
+// generation and the DXVK build.
+//
+// Six entry points of query and set, the multiview pair, the SPS pair, the
+// ModifiedW pair.  Only multiview is implemented at this time.  The others
+// exist as the shape for the next person who may be looking at VR
+// implementation.
+//
+// All three queries follow the same rule, reporting supported only if the
+// stack can deliver and ModifiedW gates the check on DXVK multiview instead of
+// the card capabilities.
+// ---------------------------------------------------------------------------
+
+// Resolves the adapter behind a device or context, so capability queries can
+// answer from the GPU actually in use rather than the first one enumerated.
+//
+// Architecture thresholds, matching NVIDIA's Windows driver:
+//   Single-Pass Stereo (2 views)   Pascal (GTX 10xx) or newer
+//   Multi-View (up to 4 views)     Turing (RTX 20xx) or newer
+//
+// Architecture is necessary but not sufficient: see
+// NvAPI_D3D_QueryMultiViewSupport and NvAPI_D3D_QueryModifiedWSupport,
+// which also require DXVK to implement the interfaces that do the work.
 static NvapiAdapter* GetMultiViewAdapter(IUnknown* pDeviceOrContext) {
     if (!pDeviceOrContext || !nvapiAdapterRegistry)
         return nullptr;
 
-    // The game may hand us an ID3D11Device or an ID3D11DeviceContext,
-    // normalize to the device first
+    // The game may pass an ID3D11Device or an ID3D11DeviceContext,
+    // normalise to the device first
     Com<ID3D11Device> device;
     if (FAILED(pDeviceOrContext->QueryInterface(IID_PPV_ARGS(&device)))) {
         Com<ID3D11DeviceContext> context;
@@ -423,6 +442,19 @@ static NvapiAdapter* GetMultiViewAdapter(IUnknown* pDeviceOrContext) {
     return nvapiAdapterRegistry->FindAdapter(adapterDesc.AdapterLuid);
 }
 
+// Multi-view needs Turing or newer for the hardware, and DXVK's revision 2
+// interfaces for anything to act on it. Both are required.  Every entry point
+// that depends on multi-view availability answers from here, so a capability
+// query and the setter behind it cannot reach different conclusions.
+static bool IsMultiViewAvailable(IUnknown* pDeviceOrContext) {
+    auto adapter = GetMultiViewAdapter(pDeviceOrContext);
+    if (!adapter || adapter->GetArchitectureId() < NV_GPU_ARCHITECTURE_TU100)
+        return false;
+
+    auto device = NvapiD3d11Device::GetOrCreate(pDeviceOrContext);
+    return device && device->SupportsMultiview();
+}
+
 NVAPI_FUNCTION NvAPI_D3D_QueryMultiViewSupport(IUnknown* pDevice, NV_QUERY_MULTIVIEW_SUPPORT_PARAMS* pQueryMultiViewSupportedParams) {
     constexpr auto n = __func__;
     thread_local bool alreadyLogged = false;
@@ -439,24 +471,27 @@ NVAPI_FUNCTION NvAPI_D3D_QueryMultiViewSupport(IUnknown* pDevice, NV_QUERY_MULTI
     if (pQueryMultiViewSupportedParams->version != NV_QUERY_MULTIVIEW_SUPPORT_PARAMS_VER1)
         return IncompatibleStructVersion(n, pQueryMultiViewSupportedParams->version);
 
-    auto pascalOrNewer = false;
-    auto turingOrNewer = false;
-    if (auto adapter = GetMultiViewAdapter(pDevice)) {
-        auto architectureId = adapter->GetArchitectureId();
-        pascalOrNewer = architectureId >= NV_GPU_ARCHITECTURE_GP100;
-        turingOrNewer = architectureId >= NV_GPU_ARCHITECTURE_TU100;
-    }
+    // Capability has to describe the whole stack, not just the card.  The
+    // hardware threshold is necessary but not sufficient: the work is done by
+    // DXVK, so without its multi-view interfaces this would be telling an
+    // application a feature is available that nothing would act on.
+    auto multiViewSupported = IsMultiViewAvailable(pDevice);
 
-    pQueryMultiViewSupportedParams->bMultiViewSupported = turingOrNewer;
-    pQueryMultiViewSupportedParams->bSinglePassStereoSupported = pascalOrNewer;
-    pQueryMultiViewSupportedParams->bSinglePassStereoXYZWSupported = turingOrNewer;
+    // To ensure all fields in the caller's struct are populated they are all
+    // written to for every call.  Single-Pass Stereo is not implemented, so
+    // it is reported unsupported regardless of the card. See
+    // NvAPI_D3D_QuerySinglePassStereoSupport.
+    pQueryMultiViewSupportedParams->bMultiViewSupported = multiViewSupported;
+    pQueryMultiViewSupportedParams->bSinglePassStereoSupported = false;
+    pQueryMultiViewSupportedParams->bSinglePassStereoXYZWSupported = false;
 
-    return Ok(str::format(n, " (MultiView=", turingOrNewer ? "supported" : "unsupported", "/SPS=", pascalOrNewer ? "supported" : "unsupported", ")"), alreadyLogged);
+    return Ok(str::format(n, " (MultiView=", multiViewSupported ? "supported" : "unsupported", ")"), alreadyLogged);
 }
 
 NVAPI_FUNCTION NvAPI_D3D_SetMultiViewMode(IUnknown* pDevOrContext, NV_MULTIVIEW_PARAMS* pMultiViewParams) {
     constexpr auto n = __func__;
     thread_local bool alreadyLogged = false;
+    thread_local bool alreadyLoggedNoImplementation = false;
 
     if (log::tracing())
         log::trace(n, log::fmt::ptr(pDevOrContext), log::fmt::ptr(pMultiViewParams));
@@ -470,15 +505,21 @@ NVAPI_FUNCTION NvAPI_D3D_SetMultiViewMode(IUnknown* pDevOrContext, NV_MULTIVIEW_
     if (pMultiViewParams->numViews == 0 || pMultiViewParams->numViews > NV_MULTIVIEW_MAX_SUPPORTED_VIEWS)
         return InvalidArgument(n);
 
+    // Nothing to forward to where the capability query reports unsupported,
+    // and forwarding anyway would have the two disagree.
+    if (!IsMultiViewAvailable(pDevOrContext))
+        return NoImplementation(n, alreadyLoggedNoImplementation);
+
     // Forward the toggle to DXVK when it implements the extended interfaces
     if (auto device = NvapiD3d11Device::GetOrCreate(pDevOrContext);
         device && device->SetMultiviewMode(pMultiViewParams->numViews, pMultiViewParams->independentViewportMaskEnable != 0))
         return Ok(str::format(n, " (numViews=", pMultiViewParams->numViews, ") (forwarded)"), alreadyLogged);
 
-    // Otherwise accept and log the request without acting on it. NVIDIA
-    // documents this call as asynchronous, so returning OK only means the
-    // arguments were valid.
-    return Ok(str::format(n, " (numViews=", pMultiViewParams->numViews, ") (not implemented, ignoring)"), alreadyLogged);
+    // No DXVK multi-view support, so nothing can act on this. Refuse rather
+    // than returning OK: an application has no way to detect a lie, and
+    // NvAPI_D3D_QueryMultiViewSupport reports unsupported in the same
+    // case, so this is the consistent answer rather than a surprising one.
+    return NoImplementation(n, alreadyLoggedNoImplementation);
 }
 
 NVAPI_FUNCTION NvAPI_D3D_QuerySinglePassStereoSupport(IUnknown* pDevice, NV_QUERY_SINGLE_PASS_STEREO_SUPPORT_PARAMS* pQuerySinglePassStereoSupportedParams) {
@@ -494,34 +535,36 @@ NVAPI_FUNCTION NvAPI_D3D_QuerySinglePassStereoSupport(IUnknown* pDevice, NV_QUER
     if (!pDevice || !pQuerySinglePassStereoSupportedParams)
         return InvalidArgument(n);
 
-    auto pascalOrNewer = false;
-    auto turingOrNewer = false;
-    if (auto adapter = GetMultiViewAdapter(pDevice)) {
-        auto architectureId = adapter->GetArchitectureId();
-        pascalOrNewer = architectureId >= NV_GPU_ARCHITECTURE_GP100;
-        turingOrNewer = architectureId >= NV_GPU_ARCHITECTURE_TU100;
-    }
-
+    // Single-Pass Stereo is not implemented, so this reports false whatever
+    // the card can do. Reporting the hardware capability instead would send
+    // an application down a path that NvAPI_D3D_SetSinglePassStereoMode then
+    // refuses, which is worse than a plain no.
+    //
+    // The route in is short, and matches what multi-view already does here:
+    // add the entry points to ID3D11VkExtDevice2 / ID3D11VkExtContext2 in
+    // DXVK, forward through NvapiD3d11Device the way SetMultiviewMode does,
+    // and report true once the device confirms support. Contributions welcome,
+    // VR titles are the obvious beneficiary.
     switch (pQuerySinglePassStereoSupportedParams->version) {
         case NV_QUERY_SINGLE_PASS_STEREO_SUPPORT_PARAMS_VER1: {
             auto pParamsV1 = reinterpret_cast<NV_QUERY_SINGLE_PASS_STEREO_SUPPORT_PARAMS_V1*>(pQuerySinglePassStereoSupportedParams);
-            pParamsV1->bSinglePassStereoSupported = pascalOrNewer;
+            pParamsV1->bSinglePassStereoSupported = false;
             break;
         }
         case NV_QUERY_SINGLE_PASS_STEREO_SUPPORT_PARAMS_VER2:
-            pQuerySinglePassStereoSupportedParams->bSinglePassStereoSupported = pascalOrNewer;
-            pQuerySinglePassStereoSupportedParams->bSinglePassStereoXYZWSupported = turingOrNewer;
+            pQuerySinglePassStereoSupportedParams->bSinglePassStereoSupported = false;
+            pQuerySinglePassStereoSupportedParams->bSinglePassStereoXYZWSupported = false;
             break;
         default:
             return IncompatibleStructVersion(n, pQuerySinglePassStereoSupportedParams->version);
     }
 
-    return Ok(str::format(n, " (SPS=", pascalOrNewer ? "supported" : "unsupported", ")"), alreadyLogged);
+    return Ok(str::format(n, " (SPS=unsupported, not implemented)"), alreadyLogged);
 }
 
 NVAPI_FUNCTION NvAPI_D3D_SetSinglePassStereoMode(IUnknown* pDevOrContext, NvU32 numViews, NvU32 renderTargetIndexOffset, NvU8 independentViewportMaskEnable) {
     constexpr auto n = __func__;
-    thread_local bool alreadyLogged = false;
+    thread_local bool alreadyLoggedNoImplementation = false;
 
     if (log::tracing())
         log::trace(n, log::fmt::ptr(pDevOrContext), numViews, renderTargetIndexOffset, independentViewportMaskEnable);
@@ -529,8 +572,10 @@ NVAPI_FUNCTION NvAPI_D3D_SetSinglePassStereoMode(IUnknown* pDevOrContext, NvU32 
     if (!pDevOrContext || numViews == 0)
         return InvalidArgument(n);
 
-    // Accept and log the request, see NvAPI_D3D_SetMultiViewMode
-    return Ok(str::format(n, " (numViews=", numViews, ") (not implemented, ignoring)"), alreadyLogged);
+    // Not implemented, and NvAPI_D3D_QuerySinglePassStereoSupport says so, so
+    // a well-behaved application should never reach here. Refusing keeps the
+    // two consistent for one that does anyway.
+    return NoImplementation(n, alreadyLoggedNoImplementation);
 }
 
 NVAPI_FUNCTION NvAPI_D3D_QueryModifiedWSupport(IUnknown* pDev, NV_QUERY_MODIFIED_W_SUPPORT_PARAMS* pQueryModifiedWSupportedParams) {
@@ -554,15 +599,29 @@ NVAPI_FUNCTION NvAPI_D3D_QueryModifiedWSupport(IUnknown* pDev, NV_QUERY_MODIFIED
     if (auto adapter = GetMultiViewAdapter(pDev))
         pascalOrNewer = adapter->GetArchitectureId() >= NV_GPU_ARCHITECTURE_GP100;
 
-    pQueryModifiedWSupportedParams->bModifiedWSupported = pascalOrNewer;
+    // iRacing's SMP toggle queries this, FALSE greys the toggle
+    // and TRUE brings it back.
+    // iRacing will use SetModifiedWMode when SMP is on and
+    // Multiview is not actually available.  Answering TRUE without
+    // DXVK multiview will offer a three screen W warp and not
+    // deliver the middle and right screen 3D content.
+    // Linking in SupportsMultiview() to the query stops the toggle
+    // being available if it is not actually available in DXVK.
+    // Pascal is the Modified-W hardware requirement, but the gate here only
+    // holds while an application that sees this reported supported takes the
+    // multi-view route instead and never enters the Modified-W path. Below
+    // Turing multi-view is unavailable, so that no longer holds and this must
+    // report unsupported.
+    auto modifiedWSupported = pascalOrNewer && IsMultiViewAvailable(pDev);
 
-    // Accept and log the request, see NvAPI_D3D_SetMultiViewMode
-    return Ok(str::format(n, " (ModifiedW=", pascalOrNewer ? "supported" : "unsupported", ")"), alreadyLogged);
+    pQueryModifiedWSupportedParams->bModifiedWSupported = modifiedWSupported;
+
+    return Ok(str::format(n, " (ModifiedW=", modifiedWSupported ? "supported" : "unsupported", ")"), alreadyLogged);
 }
 
 NVAPI_FUNCTION NvAPI_D3D_SetModifiedWMode(IUnknown* pDevOrContext, NV_MODIFIED_W_PARAMS* psModifiedWParams) {
     constexpr auto n = __func__;
-    thread_local bool alreadyLogged = false;
+    thread_local bool alreadyLoggedNoImplementation = false;
 
     if (log::tracing())
         log::trace(n, log::fmt::ptr(pDevOrContext), log::fmt::ptr(psModifiedWParams));
@@ -576,6 +635,17 @@ NVAPI_FUNCTION NvAPI_D3D_SetModifiedWMode(IUnknown* pDevOrContext, NV_MODIFIED_W
     if (psModifiedWParams->numEntries > NV_MODIFIED_W_MAX_VIEWPORTS)
         return InvalidArgument(n);
 
-    // Accept and log the request, see NvAPI_D3D_SetMultiViewMode
-    return Ok(str::format(n, " (numEntries=", psModifiedWParams->numEntries, ") (not implemented, ignoring)"), alreadyLogged);
+    // iRacing's SMP capability checks route here for calls only when
+    // multiview is unavailable.  With a stock DXVK for SMP there
+    // will be thousands of calls per session with the
+    // coefficient shape of A=-2.45156, 0, +2.45156 and B=0,
+    // in w' = w + Ax + By for a W warp which appears to be symmetrical
+    // but this is due to how iRacing interprets one value entered for
+    // side monitor angles, change this in the ini file and these values
+    // change.  Nothing is implemented with the gate in
+    // QueryModifiedWSupport checking SupportsMultiview() meaning this
+    // cannot be reached but the refusal remains for consistency and
+    // honesty.  A future implementation would be self contained here
+    // as the coefficient shape is mentioned above.
+    return NoImplementation(n, alreadyLoggedNoImplementation);
 }

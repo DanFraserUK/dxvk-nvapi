@@ -32,7 +32,8 @@ namespace dxvk {
 
         [[nodiscard]] HRESULT CreateVertexShaderNvSemantics(const void* pShaderBytecode, size_t bytecodeLength, ID3D11ClassLinkage* pClassLinkage, const D3D11_VK_NV_CUSTOM_SEMANTIC* pSemantics, uint32_t numSemantics, ID3D11VertexShader** ppVertexShader) const;
         [[nodiscard]] HRESULT CreateGeometryShaderNvSemantics(const void* pShaderBytecode, size_t bytecodeLength, ID3D11ClassLinkage* pClassLinkage, const D3D11_VK_NV_CUSTOM_SEMANTIC* pSemantics, uint32_t numSemantics, bool useViewportMask, ID3D11GeometryShader** ppGeometryShader) const;
-        bool SetMultiviewMode(uint32_t numViews, bool independentViewportMask) const;
+        [[nodiscard]] bool SetMultiviewMode(uint32_t numViews, bool independentViewportMask) const;
+        [[nodiscard]] bool SupportsMultiview() const;
 
       private:
         [[nodiscard]] static NvapiD3d11Device* Get(IUnknown* deviceOrContext);

@@ -73,8 +73,9 @@ namespace dxvk {
         m_supportsExtContext1 = probeInterfaceChain(dxvkContext, {__uuidof(ID3D11VkExtContext1)}) >= 1;
 
         // Revision-2 interfaces exist only on a DXVK that implements the
-        // multi-view entry points. Without them, shader creation falls back
-        // to the plain path.
+        // multi-view entry points. Without them there is nothing to forward
+        // to, so the multi-view entry points report unsupported and refuse
+        // rather than doing something else instead.
         m_supportsExtDevice2 = probeInterfaceChain(dxvkDevice, {__uuidof(ID3D11VkExtDevice1), __uuidof(ID3D11VkExtDevice2)}) >= 2;
         m_supportsExtContext2 = probeInterfaceChain(dxvkContext, {__uuidof(ID3D11VkExtContext1), __uuidof(ID3D11VkExtContext2)}) >= 2;
     }
@@ -93,8 +94,17 @@ namespace dxvk {
         return m_dxvkDevice->CreateGeometryShaderNvSemantics(pShaderBytecode, bytecodeLength, pClassLinkage, pSemantics, numSemantics, useViewportMask, ppGeometryShader);
     }
 
+    // Both revision-2 interfaces are required, and both are checked here so
+    // that capability reporting and the setter cannot disagree: the device
+    // creates the shaders, the context carries the per-draw toggle, and a
+    // DXVK offering one without the other would allow multi-view to be
+    // advertised as supported and then fail to deliver it.
+    bool NvapiD3d11Device::SupportsMultiview() const {
+        return m_supportsExtDevice2 && m_supportsExtContext2;
+    }
+
     bool NvapiD3d11Device::SetMultiviewMode(uint32_t numViews, bool independentViewportMask) const {
-        if (!m_supportsExtContext2)
+        if (!SupportsMultiview())
             return false;
 
         m_dxvkContext->SetMultiviewModeNV(numViews, independentViewportMask ? TRUE : FALSE);
