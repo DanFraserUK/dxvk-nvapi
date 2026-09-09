@@ -600,13 +600,8 @@ NVAPI_FUNCTION NvAPI_D3D_QueryModifiedWSupport(IUnknown* pDev, NV_QUERY_MODIFIED
         pascalOrNewer = adapter->GetArchitectureId() >= NV_GPU_ARCHITECTURE_GP100;
 
     // iRacing's SMP toggle queries this, FALSE greys the toggle
-    // and TRUE brings it back.
-    // iRacing will use SetModifiedWMode when SMP is on and
-    // Multiview is not actually available.  Answering TRUE without
-    // DXVK multiview will offer a three screen W warp and not
-    // deliver the middle and right screen 3D content.
-    // Linking in SupportsMultiview() to the query stops the toggle
-    // being available if it is not actually available in DXVK.
+    // and TRUE brings it back. iRacing will use SetModifiedWMode when SMP is
+    // on and Multiview is not actually available.
     // Pascal is the Modified-W hardware requirement, but the gate here only
     // holds while an application that sees this reported supported takes the
     // multi-view route instead and never enters the Modified-W path. Below
